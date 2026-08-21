@@ -1,0 +1,66 @@
+with pr_approval as (
+select
+pr.id as pr_id,
+pr.name as purchase_request,
+pr.write_date as pr_approved_date
+from public.purchase_request pr
+left join public.res_users ru
+on pr.requested_by = ru.id
+left join public.res_partner rp
+on ru.partner_id = rp.id
+where pr.state = 'approved'
+and pr.write_date >= '2026-04-01'
+and rp.name in ('Divyaprakash Vijayakumar','Mahendran Ponnusamy',
+'Meena Vajravelu','kirthika Muniappan')),
+
+line_po as (
+select
+prl.request_id as pr_id,
+prl.id as line_id,
+rp_m.name as merchandiser,
+po.id as po_id,
+po.name as purchase_order,
+po.date_approve as po_confirm_date,
+rp_v.name as vendor
+from public.purchase_request_line prl
+left join public.res_users ru
+on prl.merchandiser = ru.id
+left join public.res_partner rp_m
+on ru.partner_id = rp_m.id
+left join public.purchase_request_allocation pra
+on prl.id = pra.purchase_request_line_id
+left join public.purchase_order_line pol
+on pra.purchase_line_id = pol.id
+left join public.purchase_order po
+on pol.order_id = po.id
+left join public.res_partner rp_v
+on po.partner_id = rp_v.id
+where po.state = 'done'
+and po.date_approve is not null
+and exists (
+select 1
+from public.purchase_order_line pol_check
+where pol_check.order_id = po.id
+and pol_check.qty_received < pol_check.product_qty)
+and (
+not exists (select 1 from public.stock_picking sp where sp.origin = po.name)
+or exists (select 1 from public.stock_picking sp where sp.origin = po.name and sp.state <> 'cancel'))),
+
+po_link as (
+select distinct on (pr_id, po_id)
+pr_id, po_id, purchase_order, po_confirm_date, vendor, merchandiser
+from line_po
+order by pr_id, po_id, (merchandiser is null) asc, line_id)
+
+select
+pl.merchandiser as "Merchandiser",
+pl.vendor as "Partner",
+pa.purchase_request as "Purchase Request",
+pa.pr_approved_date as "PR Approved Date",
+pl.purchase_order as "Purchase Order",
+pl.po_confirm_date as "PO Confirm Date",
+(pl.po_confirm_date::date - pa.pr_approved_date::date) as "PR to PO Days"
+from pr_approval pa
+inner join po_link pl
+on pa.pr_id = pl.pr_id
+order by pa.pr_approved_date desc, pl.po_confirm_date desc;
